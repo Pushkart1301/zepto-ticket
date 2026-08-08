@@ -3,15 +3,26 @@ interface DecisionBadgeProps {
 }
 
 export default function DecisionBadge({ decision }: DecisionBadgeProps) {
-  const colors: Record<string, string> = {
-    approve: "green",
-    reject: "red",
-    escalate: "yellow",
+  const getBadgeType = (decision: string) => {
+    if (decision === 'approve') return 'success';
+    if (decision === 'reject') return 'blocked';
+    if (decision === 'escalate') return 'attention';
+    return 'neutral';
   };
 
+  const getIcon = (decision: string) => {
+    if (decision === 'approve') return '✓';
+    if (decision === 'reject') return '×';
+    if (decision === 'escalate') return '↑';
+    return '·';
+  };
+
+  const type = getBadgeType(decision);
+
   return (
-    <span className="decision-badge" style={{ backgroundColor: colors[decision] || "gray" }}>
-      {decision.toUpperCase()}
+    <span className={`badge badge-${type}`}>
+      <span style={{ fontSize: '0.625rem' }}>{getIcon(decision)}</span>
+      {decision}
     </span>
   );
 }
