@@ -1,6 +1,6 @@
 """
 similarity.py
-TF-IDF vectorisation + cosine similarity to find top-K historical precedents.
+Improved TF-IDF vectorisation + cosine similarity to find top-K historical precedents.
 
 Corpus: resolved_tickets.csv
 Query:  new_tickets.csv descriptions
@@ -10,10 +10,17 @@ Key field mapping (actual CSV columns):
   resolved_tickets → resolution_action      → action in Precedent
   resolved_tickets → resolution_note        → resolution_note in Precedent
   resolved_tickets → csat                   → csat in Precedent
+
+Improvements:
+  - Text normalization & cleaning (lowercasing, punctuation removal)
+  - English stop-words removal to eliminate noise matches ("in", "my", "from")
+  - Unigram, bigram, & trigram features (ngram_range=(1, 3))
+  - Sublinear term frequency scaling + L2 normalization
 """
 
 from __future__ import annotations
 
+import re
 import numpy as np
 import pandas as pd
 from dataclasses import dataclass
@@ -40,6 +47,16 @@ _matrix = None          # sparse TF-IDF matrix of resolved corpus
 _resolved_df: pd.DataFrame | None = None
 
 
+def _clean_text(text: str) -> str:
+    """Normalize text: lowercase, remove non-alphanumeric punctuation, clean spaces."""
+    if not text:
+        return ""
+    text = text.lower()
+    text = re.sub(r"[^\w\s]", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def _build_index() -> None:
     """Fit TF-IDF on all resolved ticket descriptions. Idempotent."""
     global _vectorizer, _matrix, _resolved_df
@@ -49,18 +66,22 @@ def _build_index() -> None:
     _resolved_df = load_resolved_tickets()
 
     # Combine category + description for richer signal
-    corpus = (
+    corpus_raw = (
         _resolved_df["category"].fillna("") + " " +
         _resolved_df["description"].fillna("")
     ).tolist()
 
+    corpus = [_clean_text(doc) for doc in corpus_raw]
+
     _vectorizer = TfidfVectorizer(
         strip_accents="unicode",
         lowercase=True,
-        ngram_range=(1, 2),     # unigrams + bigrams
+        stop_words="english",
+        ngram_range=(1, 3),     # unigrams, bigrams, trigrams
         min_df=1,
         max_df=0.95,
         sublinear_tf=True,      # log(1+tf) dampening
+        norm="l2",
     )
     _matrix = _vectorizer.fit_transform(corpus)
 
@@ -79,19 +100,17 @@ def find_similar_tickets(
     """
     _build_index()
 
-    combined_query = f"{category} {query_text}".strip()
+    combined_query = _clean_text(f"{category} {query_text}")
     query_vec = _vectorizer.transform([combined_query])
 
-    # cosine_similarity returns shape (1, n_resolved)
     sims = sklearn_cosine(query_vec, _matrix).flatten()
 
-    # Get indices sorted by descending similarity
     top_indices = np.argsort(sims)[::-1][:top_k]
 
     precedents: List[Precedent] = []
     for idx in top_indices:
         sim_score = float(sims[idx])
-        if sim_score < 0.01:      # truly zero — skip noise
+        if sim_score < 0.01:
             continue
         row = _resolved_df.iloc[idx]
         csat_val = row.get("csat")

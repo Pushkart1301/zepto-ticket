@@ -1,12 +1,11 @@
 """
 run_pipeline.py
-Standalone test runner - processes the first 10 new tickets and prints JSON.
+Standalone test runner - processes all new tickets, evaluates decisions,
+prints summary statistics, and saves full JSON output.
 
 Usage:
     cd backend
-    python run_pipeline.py
-
-No FastAPI, no Docker, no LLM - just pure pipeline.
+    python -X utf8 run_pipeline.py
 """
 
 import json
@@ -26,56 +25,60 @@ from app.services.data_loader import load_new_tickets
 
 def main():
     new_tickets = load_new_tickets()
-    # Test on first 10 real tickets
-    ticket_ids = new_tickets["ticket_id"].tolist()[:10]
+    ticket_ids = new_tickets["ticket_id"].tolist()
 
-    print("=" * 70)
-    print(f"ZEPTO TICKET INTELLIGENCE PIPELINE  —  {len(ticket_ids)} tickets")
-    print("=" * 70)
+    print("=" * 80)
+    print(f"ZEPTO TICKET INTELLIGENCE PIPELINE  -  EVALUATING {len(ticket_ids)} REAL TICKETS")
+    print("=" * 80)
 
     results = []
-    auto_count  = 0
-    human_count = 0
+    reason_code_counts = {}
+    status_counts = {"AUTO_RESOLVE": 0, "HUMAN_REVIEW": 0}
 
     for tid in ticket_ids:
         result = process_ticket(tid)
         results.append(result)
 
         dec = result["decision"]
-        if dec["status"] == "AUTO_RESOLVE":
-            auto_count += 1
-        else:
-            human_count += 1
+        st = dec["status"]
+        rc = dec["reason_code"]
 
-        print(f"\n{'─'*60}")
-        print(f"Ticket : {tid}  |  {dec['status']}  |  conf={dec['confidence']}")
+        status_counts[st] = status_counts.get(st, 0) + 1
+        reason_code_counts[rc] = reason_code_counts.get(rc, 0) + 1
+
+        print(f"\n{'─'*70}")
+        print(f"Ticket : {tid}  |  {st}  |  conf={dec['confidence']:.4f}")
         print(f"  desc : {result['ticket']['description']}")
         print(f"  action     : {dec['action']}")
-        print(f"  reason_code: {dec['reason_code']}")
+        print(f"  reason_code: {rc}")
         if result["precedents"]:
             print(f"  top precedents:")
             for p in result["precedents"]:
                 print(f"    [{p['ticket_id']}] sim={p['similarity']:.4f} "
                       f"action={p['action']}  csat={p['csat']}")
 
-    # ── Summary ───────────────────────────────────────────────────────────────
-    print(f"\n{'='*70}")
-    print("SUMMARY")
-    print(f"{'='*70}")
-    print(f"  AUTO_RESOLVE : {auto_count}")
-    print(f"  HUMAN_REVIEW : {human_count}")
+    # ── Summary Statistics ───────────────────────────────────────────────────
+    print(f"\n{'='*80}")
+    print("SUMMARY STATISTICS")
+    print(f"{'='*80}")
+    print(f"  AUTO_RESOLVE : {status_counts['AUTO_RESOLVE']} ({status_counts['AUTO_RESOLVE']/len(ticket_ids)*100:.1f}%)")
+    print(f"  HUMAN_REVIEW : {status_counts['HUMAN_REVIEW']} ({status_counts['HUMAN_REVIEW']/len(ticket_ids)*100:.1f}%)")
     print(f"  TOTAL        : {len(ticket_ids)}")
 
-    # ── Save full JSON output ─────────────────────────────────────────────────
+    print(f"\n  REASON CODE BREAKDOWN:")
+    for code, count in sorted(reason_code_counts.items(), key=lambda x: x[1], reverse=True):
+        print(f"    - {code}: {count}")
+
+    # ── Save Full Output JSON ────────────────────────────────────────────────
     out_path = Path(__file__).parent / "data" / "pipeline_output.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, default=str)
     print(f"\n  Full JSON saved → {out_path}")
 
-    # ── Print 3 sample tickets for Person 2 ──────────────────────────────────
-    print(f"\n{'='*70}")
-    print("SAMPLE JSON (first 3 tickets) — ready for Person 2 integration")
-    print(f"{'='*70}")
+    # ── Print 3 Sample Tickets for Person 2 Integration ──────────────────────
+    print(f"\n{'='*80}")
+    print("SAMPLE JSON OUTPUT (first 3 tickets) — ready for Person 2 integration")
+    print(f"{'='*80}")
     print(json.dumps(results[:3], indent=2, default=str))
 
 
